@@ -11,7 +11,10 @@ import paymentRoutes    from './routes/payments.js'
 
 const app = express()
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }))
+app.use(cors({
+  origin: ['http://localhost:5173', 'https://quick-bite.vercel.app'],
+  credentials: true
+}))
 app.use(express.json())
 
 app.use('/api/auth',        authRoutes)
