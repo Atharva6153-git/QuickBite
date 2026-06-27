@@ -12,10 +12,17 @@ import paymentRoutes    from './routes/payments.js'
 const app = express()
 
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'https://quick-bite-iota-gray.vercel.app'
-  ],
+  origin: (origin, callback) => {
+    const allowed = [
+      'http://localhost:5173',
+      /\.vercel\.app$/
+    ]
+    if (!origin || allowed.some(o => typeof o === 'string' ? o === origin : o.test(origin))) {
+      callback(null, true)
+    } else {
+      callback(new Error('Not allowed by CORS'))
+    }
+  },
   credentials: true
 }))
 app.use(express.json())
