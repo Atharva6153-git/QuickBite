@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import 'leaflet-routing-machine'
-import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
 import { getOrder } from '../api'
 import { CheckCircle, Clock, ChefHat, Bike, Home } from 'lucide-react'
 
@@ -29,53 +27,21 @@ const destIcon = L.divIcon({
   iconAnchor: [14, 28],
 })
 
-// Fixed restaurant location for the demo (kept as-is, since the order's
-// actual restaurant address isn't geocoded yet)
 const RESTAURANT_POS = [19.0760, 72.8777]
 
 const STEPS = [
-  { key: 'pending',           label: 'Order placed',        icon: CheckCircle },
-  { key: 'confirmed',         label: 'Order confirmed',     icon: CheckCircle },
-  { key: 'preparing',         label: 'Preparing your food', icon: ChefHat     },
-  { key: 'out_for_delivery',  label: 'Out for delivery',    icon: Bike        },
-  { key: 'delivered',         label: 'Delivered!',          icon: Home        },
+  { key: 'pending',          label: 'Order placed',        icon: CheckCircle },
+  { key: 'confirmed',        label: 'Order confirmed',     icon: CheckCircle },
+  { key: 'preparing',        label: 'Preparing your food', icon: ChefHat     },
+  { key: 'out_for_delivery', label: 'Out for delivery',    icon: Bike        },
+  { key: 'delivered',        label: 'Delivered!',          icon: Home        },
 ]
 
-// This component has no visual output of its own (`return null`) — its
-// only job is to talk directly to the underlying Leaflet map object
-// (via useMap) and add the routing-machine's road-following line to it.
-// react-leaflet doesn't wrap this library, so we control it manually.
-function RoutingMachine({ from, to, onRouteFound }) {
+function MapUpdater({ center }) {
   const map = useMap()
-  const controlRef = useRef(null)
-
   useEffect(() => {
-    if (!from || !to || !map) return
-
-    const control = L.Routing.control({
-      waypoints: [L.latLng(from[0], from[1]), L.latLng(to[0], to[1])],
-      lineOptions: {
-        styles: [{ color: '#f97316', weight: 4, opacity: 0.85 }]
-      },
-      addWaypoints: false,
-      draggableWaypoints: false,
-      fitSelectedRoutes: true,
-      show: false,               // hides the turn-by-turn text panel
-      createMarker: () => null,  // we render our own emoji markers instead
-    }).addTo(map)
-
-    controlRef.current = control
-
-    control.on('routesfound', (e) => {
-      const coords = e.routes[0].coordinates.map(c => [c.lat, c.lng])
-      onRouteFound(coords)
-    })
-
-    return () => {
-      if (controlRef.current) map.removeControl(controlRef.current)
-    }
-  }, [map, from, to])
-
+    if (center) map.panTo(center, { animate: true, duration: 1 })
+  }, [center, map])
   return null
 }
 
@@ -83,20 +49,18 @@ export default function TrackOrder() {
   const { orderId } = useParams()
   const [order, setOrder] = useState(null)
   const [userPos, setUserPos] = useState(null)
-  const [routeCoords, setRouteCoords] = useState([])
   const [riderPos, setRiderPos] = useState(RESTAURANT_POS)
   const [statusIdx, setStatusIdx] = useState(1)
   const intervalRef = useRef(null)
 
-  // Get the user's real location (their delivery destination on the map)
   useEffect(() => {
     if (!navigator.geolocation) {
-      setUserPos([19.0896, 72.8656]) // fallback if browser doesn't support it
+      setUserPos([19.0896, 72.8656])
       return
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => setUserPos([pos.coords.latitude, pos.coords.longitude]),
-      () => setUserPos([19.0896, 72.8656]) // fallback if permission denied
+      () => setUserPos([19.0896, 72.8656])
     )
   }, [])
 
@@ -113,31 +77,31 @@ export default function TrackOrder() {
       }))
   }, [orderId])
 
-  // Once the routing machine returns the actual road path (an array of
-  // [lat, lng] points following real streets), animate the rider along
-  // THOSE points instead of a straight line between two coordinates.
   useEffect(() => {
-    if (routeCoords.length === 0) return
+    if (!userPos) return
 
-    let i = 0
-    const totalPoints = routeCoords.length
+    let step = 0
+    const totalSteps = 60
+    const [lat1, lng1] = RESTAURANT_POS
+    const [lat2, lng2] = userPos
 
     intervalRef.current = setInterval(() => {
-      i++
-      const t = i / totalPoints
-      const pointIdx = Math.min(i, totalPoints - 1)
-      setRiderPos(routeCoords[pointIdx])
-
+      step++
+      const t = step / totalSteps
+      setRiderPos([
+        lat1 + (lat2 - lat1) * t,
+        lng1 + (lng2 - lng1) * t
+      ])
       if (t < 0.3)      setStatusIdx(2)
       else if (t < 0.6) setStatusIdx(3)
-      else if (i >= totalPoints - 1) {
+      else if (t >= 1) {
         setStatusIdx(4)
         clearInterval(intervalRef.current)
       }
-    }, 300) // smaller interval since route has many more points than before
+    }, 800)
 
     return () => clearInterval(intervalRef.current)
-  }, [routeCoords])
+  }, [userPos])
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6">
@@ -212,17 +176,20 @@ export default function TrackOrder() {
               attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            <RoutingMachine
-              from={RESTAURANT_POS}
-              to={userPos}
-              onRouteFound={setRouteCoords}
-            />
             <Marker position={riderPos} icon={riderIcon}>
               <Popup>Your delivery rider</Popup>
             </Marker>
             <Marker position={userPos} icon={destIcon}>
               <Popup>Your location</Popup>
             </Marker>
+            <Polyline
+              positions={[RESTAURANT_POS, riderPos, userPos]}
+              color="#f97316"
+              weight={3}
+              dashArray="6 6"
+              opacity={0.7}
+            />
+            <MapUpdater center={riderPos} />
           </MapContainer>
         )}
       </div>
